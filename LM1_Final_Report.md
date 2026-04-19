@@ -51,7 +51,7 @@ We draw sentences from four Universal Dependencies (UD) treebanks (Nivre et al.,
 | German   | GSD         | de_gsd  |  
 | French   | GSD         | fr_gsd  |  
 
-For each language we sample up to 100 sentences with word counts between 5 and 20. These treebanks provide gold-standard dependency annotations that we use as reference. Data is loaded via the HuggingFace `datasets` library.
+For each language we sample up to 100 sentences with word counts between 5 and 20. These treebanks provide gold-standard dependency annotations that we use as reference. Data is loaded by downloading CoNLL-U files directly from the official [Universal Dependencies GitHub repository](https://github.com/UniversalDependencies) and parsing them with the `conllu` Python library.
 
 ### 3.2 Attention Extraction
 
@@ -105,6 +105,8 @@ We report results across all four languages using the middle layers (layers 5–
 
 ### 4.1 Incremental Edge Change — LLM vs. Random Baseline (Figure 1)
 
+![Figure 1: Structural Stability Curves](results/fig1_stability_curves.png)
+
 The IEC curves reveal a clear separation between LLM attention trees and random baselines. For all four languages, the LLM IEC starts at approximately 0.32–0.40 for prefix length 3 and decreases steadily to 0.09–0.16 by prefix length 18–20. The random baseline, in contrast, remains roughly flat at 0.50–0.62 across all prefix lengths.
 
 This confirms **H₁**: as the sentence grows, the attention-derived tree structure stabilises — earlier structural commitments are increasingly preserved. It also confirms **H₂**: the LLM stability is significantly greater than random ($p < 0.001$ for all languages; Cohen's $d$ ranging from 1.2 to 1.8, indicating large effect sizes).
@@ -112,6 +114,8 @@ This confirms **H₁**: as the sentence grows, the attention-derived tree struct
 Gold UD tree IEC values (English only) are the lowest, starting at ~0.15 and dropping to ~0.04, confirming that real dependency trees are inherently stable under prefixing and placing the LLM curves between the random baseline and the gold standard.
 
 ### 4.2 Cross-Lingual Comparison (Figure 2)
+
+![Figure 2: Cross-Lingual Comparison](results/fig2_language_comparison.png)
 
 Mean IEC values (averaged across all prefix lengths) are:
 
@@ -126,9 +130,13 @@ English and French (both SVO, relatively rigid order) show the highest stability
 
 ### 4.3 Layer-wise Analysis (Figure 3)
 
+![Figure 3: Layer-wise Analysis](results/fig3_layer_analysis.png)
+
 IEC varies substantially across BERT layers. Layers 1–3 (lowest) produce IEC values of 0.30–0.36, suggesting that early layers encode primarily positional or surface-level patterns that are unstable under prefix extension. Layers 5–8 achieve the minimum IEC (0.15–0.22), confirming **(P2)** that middle layers are the most syntactically structured. Layers 9–12 show a slight increase (0.22–0.28), consistent with the observation that upper layers shift toward more task-specific semantic representations (Tenney et al., 2019).
 
 ### 4.4 Tree Depth Volatility (Figure 4)
+
+![Figure 4: Tree Depth Volatility](results/fig4_depth_change.png)
 
 The mean absolute depth change per token added is 0.5–1.0 for LLM trees versus 1.5–2.5 for random trees. LLM trees exhibit bounded depth growth, consistent with the shallow dependency structures typical of natural language.
 
@@ -194,9 +202,13 @@ Our analysis uses head-averaged attention, which may dilute the contribution of 
 
 ## Appendix A: Complete Python Implementation
 
-The complete, runnable pipeline is provided in the accompanying file `pipeline.py`. The code implements all three stages described in §3 and generates the four figures referenced in §4. It is structured as follows:
+The complete, runnable pipeline is provided in the accompanying file `pipeline.py` and is publicly available on GitHub:
 
-1. **Data loading** (§§1–2 of the code): loads UD treebanks via HuggingFace `datasets` and initialises `bert-base-multilingual-cased`.
+> **Repository:** [https://github.com/Sandeepgupta-24/LM1-dependency-grammar](https://github.com/Sandeepgupta-24/LM1-dependency-grammar)
+
+The code implements all three stages described in §3 and generates the four figures referenced in §4. It is structured as follows:
+
+1. **Data loading** (§§1–2 of the code): downloads UD treebanks as CoNLL-U files from the official Universal Dependencies GitHub repository and initialises `bert-base-multilingual-cased`.
 2. **Attention extraction** (§§3–4): for each prefix of each sentence, extracts word-level attention matrices with subword-to-word alignment.
 3. **Tree construction** (§5): builds maximum spanning arborescences using the Chu-Liu/Edmonds algorithm via `networkx`.
 4. **Evaluation** (§§6–8): computes IEC, tree-depth change, UAS, gold-tree prefix IEC, and random baselines.
@@ -206,14 +218,12 @@ The complete, runnable pipeline is provided in the accompanying file `pipeline.p
 **Usage:**
 
 ```bash
+git clone https://github.com/Sandeepgupta-24/LM1-dependency-grammar.git
+cd LM1-dependency-grammar
 pip install -r requirements.txt
 python pipeline.py                     # Full run (100 sentences/language)
 python pipeline.py --dry_run           # Quick test (5 sentences/language)
 python pipeline.py --max_sentences 200 # Larger sample
 ```
 
-The full source code is reproduced below for reference.
-
----
-
-*[Insert contents of pipeline.py here when preparing the final PDF submission]*
+**Dependencies:** Python ≥ 3.9, PyTorch ≥ 2.0, Transformers ≥ 4.30, conllu, networkx, numpy, matplotlib, seaborn, scipy (see `requirements.txt`).
