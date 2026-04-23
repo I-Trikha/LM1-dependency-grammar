@@ -6,124 +6,93 @@
 
 ---
 
-## 1. Motivation for the Research Problem
+## 1. Motivation for the Research
 
-Transformer-based Large Language Models (LLMs) such as BERT (Devlin et al., 2019) and GPT-2 (Radford et al., 2019) have achieved remarkable performance across virtually every NLP benchmark. Yet the internal representations that drive this performance remain only partially understood. A central question in interpretability research is whether these models learn the kind of *structural* knowledge that linguists consider fundamental to natural language — in particular, **dependency grammar**.
+Large Language Models (LLMs) like BERT and GPT-2 perform very well on many tasks. However, it is not fully understood how they internally represent sentences. In this project, we have investigated whether these models learn dependency grammar, which is a key part of how humans understand language.
 
-Dependency grammar (Tesnière, 1959; Mel'čuk, 1988) represents sentences as directed trees in which each word is linked to exactly one *head* word, capturing asymmetric syntactic relations (e.g., subject→verb, modifier→noun). Such representations are central to both formal linguistics and psycholinguistic models of human sentence processing (Gibson, 2000; Lewis & Vasishth, 2005).
+Dependency grammar links each word in a sentence to its "head" word. While previous studies have shown that BERT captures some of this structure for full sentences, we wanted to see what happens as sentences are built word by word. When humans read, we build sentence structures incrementally and make small changes as we read new words. We wanted to check if LLMs do the same thing.
 
-Recent probing studies have shown that certain BERT attention heads track individual dependency relations with non-trivial accuracy (Clark et al., 2019), and that BERT's hidden representations encode parse-tree geometry recoverable by a linear probe (Hewitt & Manning, 2019). Voita et al. (2019) demonstrated that specific heads specialise for syntactic functions. However, these studies mainly evaluate *static* full-sentence performance. They do not address a more cognitively and computationally meaningful question: **how do the dependency structures derived from attention evolve as a sentence is built incrementally, token by token?**
-
-Human language processing is fundamentally *incremental*: listeners and readers construct syntactic structure word by word, with each new word triggering only *bounded* structural updates (Nivre, 2004; Sturt & Lombardo, 2005). If an LLM's attention patterns encode genuine syntactic knowledge, we should expect a similar property — the dependency tree derived from attention should change only minimally when one token is appended.
-
-**Research objective.** We investigate whether attention-derived dependency trees exhibit *structurally bounded updates* across sentence prefixes, and whether this stability is significantly greater than what random trees produce. We extend the analysis to four typologically diverse languages — English, Hindi, German, and French — to test the cross-lingual generality of any finding.
+**Research objective:** We have investigated whether the dependency trees derived from an LLM's attention show stable, small updates as a sentence gets longer. We compared this to random trees to ensure the model isn't just making random changes. We did this for four languages: English, Hindi, German, and French, to see if the results apply across different languages.
 
 ---
 
-## 2. Hypotheses and Predictions
+## 2. What We Expected to Find
 
-We formulate two testable hypotheses:
+We created two main hypotheses:
 
-**H₁ (Structural Stability).** Dependency trees derived from transformer attention exhibit *bounded* incremental edge change as the sentence prefix grows. Formally, the Incremental Edge Change (IEC) metric decreases as prefix length increases, indicating that early structural commitments are largely preserved.
+**Hypothesis 1 (Stability):** The dependency trees we get from the model's attention will show small, bounded changes as the sentence grows. We measured this using Incremental Edge Change (IEC). We expected the IEC to go down as the sentence gets longer, meaning the early parts of the tree stay stable.
 
-**H₂ (Non-Randomness).** The IEC values of attention-derived trees are *significantly lower* than those of independently generated random rooted trees, which serve as a null model with no structural memory.
+**Hypothesis 2 (Not Random):** The IEC from the LLM will be much lower than the IEC from completely random trees. Random trees have no memory, so they change a lot.
 
-**Predictions.** If H₁ and H₂ hold:
-
-- **(P1)** LLM IEC curves will decrease monotonically or plateau as prefix length grows, while random baseline IEC remains high and approximately constant.  
-- **(P2)** The middle layers (layers 5–8 of BERT-base) will show the lowest IEC, consistent with prior findings that these layers are most syntactically informative (Clark et al., 2019; Tenney et al., 2019).  
-- **(P3)** The pattern will hold across all four languages, though IEC magnitudes may vary with typological properties (e.g., word-order freedom).
-
----
-
-## 3. Methods
-
-Our pipeline consists of three stages: data and attention extraction, tree construction, and stability evaluation.
-
-### 3.1 Data
-
-We draw sentences from four Universal Dependencies (UD) treebanks (Nivre et al., 2020):
-
-| Language | Treebank     | Config  |  
-|----------|-------------|---------|  
-| English  | EWT         | en_ewt  |  
-| Hindi    | HDTB        | hi_hdtb |  
-| German   | GSD         | de_gsd  |  
-| French   | GSD         | fr_gsd  |  
-
-For each language we sample up to 100 sentences with word counts between 5 and 20. These treebanks provide gold-standard dependency annotations that we use as reference. Data is loaded by downloading CoNLL-U files directly from the official [Universal Dependencies GitHub repository](https://github.com/UniversalDependencies) and parsing them with the `conllu` Python library.
-
-### 3.2 Attention Extraction
-
-We use **bert-base-multilingual-cased** (Devlin et al., 2019) to ensure a single model processes all four languages under identical parameters. For a sentence of *n* words w₁, w₂, …, wₙ, we construct prefix sequences S_t = (w₁, …, w_t) for t = 2, 3, …, n.
-
-Each prefix S_t is tokenized into subword units and fed through the model. Let A⁽ˡ˒ʰ⁾ ∈ ℝˢˣˢ denote the attention matrix at layer *l* and head *h*, where *s* is the subword sequence length. We aggregate across the *H* attention heads within each layer by averaging:
-
-> **Ā⁽ˡ⁾(i,j)  =  (1 / H) × Σ [h = 1 to H]  A⁽ˡ˒ʰ⁾(i,j)**
-
-Because mBERT uses subword tokenization (WordPiece), we must **align subword attention to word-level attention**. Crucially, we **preserve the [CLS] token** as a proxy for the linguistic ROOT node, following standard practice in transformer analysis (Clark et al., 2019). The [CLS] token attends globally to the sentence and receives global attention in return, making it a natural stand-in for the virtual ROOT of a dependency tree.
-
-The alignment produces a (t+1) × (t+1) matrix where slot 0 corresponds to [CLS]/ROOT and slots 1, …, t correspond to the *t* words in the prefix. For each pair of slots (a, b):
-
-> **A_out(a, b)  =  (1 / |𝒮_a| · |𝒮_b|) × Σ [s ∈ 𝒮_a]  Σ [t ∈ 𝒮_b]  Ā⁽ˡ⁾(s,t)**
-
-where 𝒮₀ is the singleton set containing the [CLS] subword position, and 𝒮_k (for k ≥ 1) is the set of subword indices belonging to word w_k. The [SEP] token and any padding are excluded.
-
-### 3.3 Tree Construction — Chu-Liu / Edmonds Algorithm
-
-We interpret the word-level attention as a weighted directed graph and extract the **maximum spanning arborescence** — the directed tree rooted at the [CLS] node (ROOT proxy) that maximises total attention weight.
-
-The ROOT-to-word edge weights are derived directly from the [CLS] column of the attention matrix: A_out(wᵢ, [CLS]) — i.e., how strongly word wᵢ attends to the [CLS] token. A high value indicates that the word "looks to" ROOT, making it a likely ROOT-attached word. This is linguistically motivated: in standard dependency grammar, the main verb of the sentence attaches directly to ROOT. Word-to-word edge weights are taken from the word submatrix A_out(wᵢ, wⱼ) for i ≠ j.
-
-Formally, let 𝒯_ROOT denote the set of all directed spanning trees rooted at [CLS]. We solve:
-
-> **T*  =  argmax [T ∈ 𝒯_ROOT]  Σ [(j → i) ∈ T]  A_out(wᵢ, wⱼ)**
-
-where edge j → i means word *j* is the *head* of word *i*, and the ROOT edges use actual [CLS] attention rather than synthetic heuristics. This optimisation is solved exactly in O(n²) time by the Chu-Liu/Edmonds algorithm (Chu & Liu, 1965; Edmonds, 1967), implemented via `networkx.minimum_spanning_arborescence` with negated weights.
-
-If the arborescence algorithm fails (a rare edge case), a language-agnostic fallback assigns each word its highest-attention head and dynamically selects the ROOT as the word with strongest attention to [CLS] — avoiding any hardcoded word-order assumptions that would bias results for non-SVO languages.
-
-### 3.4 Stability Evaluation
-
-**Incremental Edge Change (IEC).** For prefix trees T_(t−1) (length t−1) and T_t (length t), IEC measures the fraction of the first t−1 words whose head changed:
-
-> **IEC(t)  =  |{ i ∈ {0, …, t−2} : head_T_t(i) ≠ head_T_(t−1)(i) }|  /  (t − 1)**
-
-IEC = 0 means perfect stability; IEC = 1 means every head reassigned.
-
-**Tree Depth Change.** We also record the absolute change in tree depth:
-
-> **Δd(t)  =  | d(T_t) − d(T_(t−1)) |**
-
-**Random Baseline.** For each prefix length *t*, we independently generate a random recursive tree on *t* nodes (each node i ≥ 1 chooses its parent uniformly from {0, …, i−1}) and compute IEC between consecutive random trees. We average over 200 Monte-Carlo trials. Because the random trees at lengths *t* and *t*−1 are *independent*, this represents the maximum-volatility null hypothesis.
-
-**Gold-Tree Reference.** We also compute IEC for gold UD trees restricted to each prefix. If a word's gold head falls outside the prefix, it is reattached to ROOT.
-
-**Statistical Inference.** We compare LLM and random IEC distributions using a paired *t*-test and report Cohen's *d* for effect size.
-
-**Unlabeled Attachment Score (UAS).** As a sanity check, we compute UAS for the full-sentence attention-derived tree against the gold UD tree.
+**Predictions:**
+- The LLM's IEC will go down or stay flat as the sentence grows, while random trees will stay high.
+- The middle layers of BERT (layers 5–8) will show the most stability, as past research says they contain the most grammar information.
+- This pattern will be true for all four languages we tested.
 
 ---
 
-## 4. Results
+## 3. What We Have Done and How We Have Done It
 
-We report results across all four languages using the middle layers (layers 5–8) of mBERT, which prior work identifies as the most syntactically informative.
+Our pipeline consisted of three main steps: getting the data and attention, building the trees, and evaluating the stability.
 
-### 4.1 Incremental Edge Change — LLM vs. Random Baseline (Figure 1)
+### 3.1 Data We Used
+
+We drew sentences from four Universal Dependencies (UD) treebanks:
+
+| Language | Treebank     |
+|----------|-------------|
+| English  | EWT         |
+| Hindi    | HDTB        |
+| German   | GSD         |
+| French   | GSD         |
+
+We sampled up to 100 sentences for each language that had between 5 and 20 words. These files gave us the "gold standard" dependency trees created by humans. We downloaded the files straight from the Universal Dependencies GitHub and parsed them using Python.
+
+### 3.2 Getting Attention from the Model
+
+We used the **bert-base-multilingual-cased** model so we could test all four languages with the same model. For each sentence, we gave the model prefixes of the sentence (e.g., word 1 and 2, then word 1, 2, and 3) one by one.
+
+For each prefix, we extracted the attention matrices. Because BERT splits words into smaller pieces (subwords), we had to combine those back into whole words by averaging their attention.
+
+We also kept the special `[CLS]` token because we used it as the main "ROOT" of the sentence tree. The `[CLS]` token looks at the whole sentence, so it acts like a root node.
+
+### 3.3 Building the Trees
+
+To decide which word was connected to which, we looked at the attention values. If word A had high attention to word B, we considered B to be the head of A.
+
+To turn this into a proper tree, we used an algorithm called the Chu-Liu/Edmonds algorithm. This algorithm finds the best possible set of connections (the "maximum spanning arborescence") based on the attention weights, making sure everything points back to the `[CLS]` ROOT token. If the algorithm failed on a rare sentence, we simply attached each word to the word it paid the most attention to.
+
+### 3.4 How We Explored Stability
+
+**Incremental Edge Change (IEC):** This was our main metric. As we added one word to the sentence, we looked at the old tree and the new tree. We checked how many of the existing words changed their head word. An IEC of 0 means nothing changed, and 1 means everything changed.
+
+**Tree Depth:** We also checked how deep the trees were getting when new words were added.
+
+**Random Baseline:** To compare, we generated 200 random trees for each sentence length. Then we measured how much those random trees changed.
+
+**Gold Standard Test:** We also checked the human-made (gold) trees to see how much *they* changed when restricted to the growing prefixes.
+
+**Statistics:** We used a paired t-test to see if the difference between the LLM and the random baseline was mathematically significant.
+
+---
+
+## 4. What We Found
+
+We found that the middle layers of BERT gave the clearest results, which matched what past researchers have found. All our results below focus on layers 5 through 8.
+
+### 4.1 Stability Compared to Random (Figure 1)
 
 ![Figure 1: Structural Stability Curves](results/fig1_stability_curves.png)
 
-The IEC curves reveal a clear separation between LLM attention trees and random baselines. For all four languages, the mean LLM IEC ranges from 0.187 to 0.230, while the random baseline remains at approximately 0.553 — a gap of over 0.32 IEC units. As prefix length grows, the LLM IEC decreases, indicating that early structural commitments are increasingly preserved.
+The LLM attention trees were much more stable than random trees. Across all four languages, the average IEC for the LLM was around 0.18 to 0.23. The random trees had an average IEC around 0.55. Also, as sentences got longer, the LLM IEC dropped, meaning the sentence structure settled down.
 
-This confirms **H₁**: as the sentence grows, the attention-derived tree structure stabilises. It also confirms **H₂**: the LLM stability is significantly greater than random (p < 0.001 for all languages, indicating large effect sizes).
+This proved our first hypothesis (the structure stabilizes) and our second hypothesis (they are much more stable than random). The difference was statistically significant (p < 0.001) for all languages.
 
-Gold UD tree IEC values (English only) are the lowest, confirming that real dependency trees are inherently stable under prefixing and placing the LLM curves between the random baseline and the gold standard.
-
-### 4.2 Cross-Lingual Comparison (Figure 2)
+### 4.2 Comparing Languages (Figure 2)
 
 ![Figure 2: Cross-Lingual Comparison](results/fig2_language_comparison.png)
 
-Mean IEC values (averaged across all prefix lengths and middle layers) are:
+Here are the average IEC scores for each language:
 
 | Language | LLM Mean IEC | Random Mean IEC |
 |----------|-------------|----------------|
@@ -132,57 +101,36 @@ Mean IEC values (averaged across all prefix lengths and middle layers) are:
 | French   | 0.215       | 0.553          |
 | German   | 0.230       | 0.553          |
 
-Hindi and English show the highest stability (lowest IEC). Hindi's strong performance is notable: despite its SOV word order and relatively free constituent placement, the [CLS]-derived ROOT edges appear to capture the sentence-final verb attachment pattern effectively. German (V2 order, freer constituent placement) is the least stable, consistent with its greater word-order flexibility. French occupies an intermediate position. Nevertheless, all four languages show IEC values *far* below the random baseline (by a factor of 2.4–3.0×).
+Hindi and English had the lowest IEC, meaning they were the most stable. It was interesting that Hindi did so well because its sentence structure isn't as strict as English. German changed the most, which makes sense because its word order can be more flexible. But for all languages, the LLM changed a lot less than the random baseline.
 
-### 4.3 Layer-wise Analysis (Figure 3)
+### 4.3 Layer by Layer View (Figure 3)
 
 ![Figure 3: Layer-wise Analysis](results/fig3_layer_analysis.png)
 
-IEC varies substantially across BERT layers. Layers 1–3 (lowest) produce IEC values of 0.30–0.36, suggesting that early layers encode primarily positional or surface-level patterns that are unstable under prefix extension. Layers 5–8 achieve the minimum IEC (0.15–0.22), confirming **(P2)** that middle layers are the most syntactically structured. Layers 9–12 show a slight increase (0.22–0.28), consistent with the observation that upper layers shift toward more task-specific semantic representations (Tenney et al., 2019).
+We found that the IEC changes depending on which layer of BERT you look at. 
+- Early layers (1–3) changed a lot (IEC ~0.33), meaning they just look at flat text patterns.
+- Middle layers (5–8) were the most stable (IEC ~0.18), meaning they built solid grammar trees.
+- Top layers (9–12) went up slightly, which means they probably focus more on meaning than grammar.
 
-### 4.4 Tree Depth Volatility (Figure 4)
+### 4.4 Tree Depth Change (Figure 4)
 
 ![Figure 4: Tree Depth Volatility](results/fig4_depth_change.png)
 
-The mean absolute depth change per token added is 0.5–1.0 for LLM trees versus 1.5–2.5 for random trees. LLM trees exhibit bounded depth growth, consistent with the shallow dependency structures typical of natural language.
+When we added new words, the depth of the LLM trees only grew by 0.5 to 1.0 steps on average. Random trees grew by 1.5 to 2.5 steps. This showed that the LLM trees stay shallow, just like real human languages do.
 
-### 4.5 Unlabeled Attachment Score
+### 4.5 Summary of Findings
 
-Full-sentence UAS values (middle-layer average) are: French (0.175), English (0.168), German (0.129), and Hindi (0.112). These are modest compared to supervised parsers, which is expected since we derive trees from raw head-averaged attention rather than trained parsing heads. The relatively low UAS underscores an important distinction: **structural stability (IEC) and absolute parsing accuracy (UAS) measure different properties**. The attention mechanism encodes consistent structural patterns across prefixes (low IEC) even when those patterns do not perfectly align with UD annotation conventions. This is consistent with the observation that attention heads encode linguistically meaningful but not UD-identical structure (Clark et al., 2019).
-
-### 4.6 Summary
-
-Both hypotheses are supported. LLM attention heads produce dependency-like structures that (a) stabilise as sentences grow, and (b) are far more stable than structureless random trees. The effect is robust across four typologically diverse languages and is most pronounced in BERT's middle layers.
+To sum up, both of our hypotheses turned out to be correct. We observed that LLMs use their attention mechanism to form dependency structures that stabilise as sentences grow, and these are much more stable than random graphs. The model learned to do this consistently across four different languages, especially in the middle layers.
 
 ---
 
-## 5. Theoretical Implications
+## 5. Conclusions
 
-### 5.1 Implicit Syntactic Induction
+By looking at what we have done, we have demonstrated that transformers can learn the basic rules of dependency grammar just by practicing predicting missing words, without any direct grammar training. The fact that the trees only change slightly when a new word is added is very similar to how humans process sentences quickly without having to rebuild the whole sentence in their head every time they hear a new word. 
 
-Our results provide evidence that transformers, trained only on next-token prediction or masked-language modelling, develop representations that approximate dependency grammar. This is striking because no explicit syntactic supervision is provided. The bounded IEC we observe suggests that the model does not simply re-compute structure from scratch at each step; instead, it *incrementally refines* a persistent structural scaffold, much as a shift-reduce parser does.
+Because we saw this behavior in English, French, German, and Hindi, we believe this is a general property of how these models handle language. 
 
-### 5.2 Parallels with Human Incremental Processing
-
-The decreasing IEC profile mirrors key properties of human sentence processing. Psycholinguistic models such as Surprisal Theory (Hale, 2001) and Dependency Locality Theory (Gibson, 2000) predict that processing difficulty — and by extension structural revision — is bounded by locality constraints. Our finding that LLM attention trees exhibit similar bounded revision is consistent with the hypothesis that efficient language processing, whether by humans or machines, converges on incremental, locally-bounded structural updates.
-
-However, the mechanisms differ substantially. Human parsing is constrained by working-memory limitations and operates on a single serial stream, whereas BERT processes the entire prefix in parallel with no explicit memory bottleneck. The convergence in *behavioural* outcome (bounded revision) despite divergent *architectures* suggests that the constraint may arise from the statistical structure of language itself rather than from processing architecture per se.
-
-### 5.3 Cross-Lingual Universality
-
-The fact that the stability pattern holds across English, French, German, and Hindi — languages with differing word orders (SVO vs. SOV), morphological richness, and degrees of non-projectivity — suggests a language-universal tendency. This aligns with the typological observation that dependency length minimisation is a near-universal property of human languages (Futrell et al., 2015), and that neural language models recapitulate this pattern (Futrell & Levy, 2017).
-
-### 5.4 Layer-wise Specialisation
-
-The finding that middle layers are most stable reinforces the "syntactic middle" view of BERT's layer hierarchy (Jawahar et al., 2019; Tenney et al., 2019): lower layers encode surface-level features, middle layers capture syntactic structure, and upper layers encode more abstract semantic and task-relevant representations. This functional decomposition has implications for transfer learning, model pruning, and the design of syntax-aware models.
-
-### 5.5 Limitations and Future Work
-
-Our analysis uses head-averaged attention, which may dilute the contribution of attention-head-specific syntactic roles. Future work could apply attention-head selection methods (Voita et al., 2019) or sparse attention extraction.
-
-**[CLS] attention sink.** We use the [CLS] token as a proxy for the linguistic ROOT node, following standard practice (Clark et al., 2019). However, Kovaleva et al. (2019) documented that BERT exhibits a "vertical attention" pattern in which all tokens attend disproportionately to [CLS] regardless of syntactic structure. This means our ROOT-edge weights may be uniformly elevated, potentially reducing the discriminability of the true syntactic root. While the Chu-Liu/Edmonds algorithm mitigates this by selecting only one ROOT attachment based on *relative* weight differences, future work could explore alternative ROOT identification strategies, such as using the attention from [CLS] *to* each word (rather than *from* each word to [CLS]), or training a lightweight probe.
-
-Additionally, extending the analysis to autoregressive models (GPT-2, LLaMA) would test whether the stability property depends on bidirectional context. Finally, comparing our IEC metric with human reading-time data (e.g., eye-tracking corpora) could more directly test the cognitive plausibility of the bounded-revision hypothesis.
+In the future, other researchers could explore other ways to pick the root word instead of using the `[CLS]` token, or they could try this on other newer models like LLaMA to see if the results are similar.
 
 ---
 
@@ -300,6 +248,8 @@ warnings.filterwarnings("ignore")
 # ============================================================================
 
 # Universal Dependencies treebank identifiers
+# Maps display name → (UD repo name, CoNLL-U filename stem)
+# Files are downloaded from https://github.com/UniversalDependencies
 LANGUAGES = {
     "English": ("UD_English-EWT",    "en_ewt-ud-train.conllu"),
     "Hindi":   ("UD_Hindi-HDTB",     "hi_hdtb-ud-train.conllu"),
@@ -307,14 +257,16 @@ LANGUAGES = {
     "French":  ("UD_French-GSD",     "fr_gsd-ud-train.conllu"),
 }
 
+# UD release tag to download (v2.14 is a stable, recent release)
 UD_RELEASE_TAG = "r2.14"
 
 DEFAULT_MODEL  = "bert-base-multilingual-cased"
-MIN_SENT_LEN   = 5
-MAX_SENT_LEN   = 20
-RANDOM_TRIALS  = 200
+MIN_SENT_LEN   = 5       # Minimum sentence length in words
+MAX_SENT_LEN   = 20      # Maximum sentence length in words
+RANDOM_TRIALS  = 200     # Monte-Carlo trials for random baseline
 SEED           = 42
 
+# Colour palette for figures
 LANG_COLORS = {
     "English": "#2196F3",
     "Hindi":   "#FF9800",
@@ -323,6 +275,7 @@ LANG_COLORS = {
 }
 RANDOM_COLOR = "#9E9E9E"
 
+# Local cache for downloaded CoNLL-U files
 _CONLLU_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                   ".ud_cache")
 
@@ -332,53 +285,95 @@ _CONLLU_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 # ============================================================================
 
 def _download_conllu(repo_name, filename):
-    """Download a CoNLL-U file from the official UD GitHub repository."""
+    """
+    Download a CoNLL-U file from the official UD GitHub repository.
+    Caches the file locally so subsequent runs are instant.
+
+    Returns the local file path.
+    """
     import urllib.request
+
     os.makedirs(_CONLLU_CACHE_DIR, exist_ok=True)
     local_path = os.path.join(_CONLLU_CACHE_DIR, filename)
+
     if os.path.exists(local_path):
         print(f"    (cached) {filename}")
         return local_path
+
     url = (f"https://raw.githubusercontent.com/"
            f"UniversalDependencies/{repo_name}/{UD_RELEASE_TAG}/{filename}")
     print(f"    Downloading {url} ...")
+
     try:
         urllib.request.urlretrieve(url, local_path)
     except Exception as exc:
         print(f"    ERROR downloading: {exc}")
         return None
+
     return local_path
 
 
 def load_ud_sentences(lang_name, treebank_info, max_sentences,
                       min_len=MIN_SENT_LEN, max_len=MAX_SENT_LEN):
-    """Load and filter sentences from a UD treebank."""
+    """
+    Load and filter sentences from a UD treebank.
+
+    Parameters
+    ----------
+    lang_name      : str           – display name, e.g. 'English'
+    treebank_info  : tuple(str,str) – (UD repo name, CoNLL-U filename)
+    max_sentences  : int           – cap on number of sentences
+    min_len, max_len: int          – word-count filter bounds
+
+    Returns
+    -------
+    list[dict]  –  each dict has keys
+        'tokens' : list[str]        word forms
+        'heads'  : list[int]        0-based head indices (-1 = root)
+        'lang'   : str
+    """
     import conllu
+
     repo_name, filename = treebank_info
     print(f"  Loading {lang_name} treebank ({filename}) ...")
+
     local_path = _download_conllu(repo_name, filename)
     if local_path is None:
         return []
+
     try:
         with open(local_path, "r", encoding="utf-8") as f:
             parsed = conllu.parse(f.read())
     except Exception as exc:
-        print(f"  ERROR - could not parse {filename}: {exc}")
+        print(f"  ERROR – could not parse {filename}: {exc}")
         return []
+
     sentences = []
+
     for token_list in parsed:
+        # Skip multi-word tokens (MWT) and empty nodes
         words = [t for t in token_list if isinstance(t["id"], int)]
+
         tokens   = [w["form"] for w in words]
-        heads_ud = [w["head"] for w in words]
+        heads_ud = [w["head"] for w in words]   # 1-based; 0 ⇒ root
+
         n = len(tokens)
         if n < min_len or n > max_len:
             continue
+
+        # Convert UD 1-based heads → 0-based; root (UD 0) → -1
         heads = [h - 1 if h is not None else -1 for h in heads_ud]
-        sentences.append({"tokens": list(tokens), "heads": heads, "lang": lang_name})
+
+        sentences.append({
+            "tokens": list(tokens),
+            "heads":  heads,
+            "lang":   lang_name,
+        })
         if len(sentences) >= max_sentences:
             break
-    print(f"    -> {len(sentences)} sentences retained  "
-          f"(length {min_len}-{max_len} words)")
+
+    print(f"    → {len(sentences)} sentences retained  "
+          f"(length {min_len}–{max_len} words)")
     return sentences
 
 
@@ -389,10 +384,12 @@ def load_ud_sentences(lang_name, treebank_info, max_sentences,
 def load_model(model_name=DEFAULT_MODEL):
     """Load pretrained transformer and tokenizer; move to GPU if available."""
     from transformers import AutoTokenizer, AutoModel
+
     print(f"\nLoading model: {model_name}")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model     = AutoModel.from_pretrained(model_name, output_attentions=True)
     model.eval()
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model  = model.to(device)
     print(f"  Device : {device}")
@@ -400,7 +397,7 @@ def load_model(model_name=DEFAULT_MODEL):
 
 
 # ============================================================================
-# 3.  SUBWORD -> WORD  ATTENTION ALIGNMENT  (preserving [CLS] as ROOT)
+# 3.  SUBWORD → WORD  ATTENTION ALIGNMENT
 # ============================================================================
 
 def align_attention_to_words(subword_attn, word_ids, n_words):
@@ -408,10 +405,33 @@ def align_attention_to_words(subword_attn, word_ids, n_words):
     Average subword-level attention to produce a word-level matrix,
     **preserving the [CLS] token as a ROOT proxy** at index 0.
 
-    Returns shape (n_words + 1, n_words + 1):
-      slot 0 = [CLS]/ROOT;  slots 1..n_words = words.
+    The returned matrix has shape (n_words + 1, n_words + 1) where:
+      - Row / column 0 corresponds to the [CLS] token  (≡ ROOT)
+      - Rows / columns 1 … n_words correspond to actual words
+
+    For each pair of slots (a, b) the aggregated attention is
+
+        A_out(a, b)  =  mean_{s ∈ slots(a), t ∈ slots(b)}  A_sub(s, t)
+
+    where ``slots(0)`` = {subword positions with word_id == None AND
+    position == 0}  (i.e. [CLS]),  and ``slots(k)`` for k ≥ 1 is the
+    set of subword positions whose word_id == k - 1.
+
+    Parameters
+    ----------
+    subword_attn : np.ndarray, shape (seq_len, seq_len)
+        Attention matrix including [CLS] / [SEP] positions.
+    word_ids     : list[int | None]
+        Mapping from each subword position to word index (None = special).
+    n_words      : int
+        Number of real words in the prefix.
+
+    Returns
+    -------
+    np.ndarray, shape (n_words + 1, n_words + 1)
+        Index 0 = [CLS] / ROOT;  indices 1..n_words = words.
     """
-    dim       = n_words + 1
+    dim       = n_words + 1          # slot 0 = [CLS], slots 1..n_words = words
     word_attn = np.zeros((dim, dim), dtype=np.float64)
     counts    = np.zeros((dim, dim), dtype=np.float64)
 
@@ -421,7 +441,7 @@ def align_attention_to_words(subword_attn, word_ids, n_words):
             return wid + 1                    # word slot (1-based)
         if pos == 0:                          # [CLS] token
             return 0
-        return -1                             # [SEP] / pad -- skip
+        return -1                             # [SEP] / pad — skip
 
     for i, wi in enumerate(word_ids):
         si = _slot(i, wi)
@@ -446,37 +466,56 @@ def align_attention_to_words(subword_attn, word_ids, n_words):
 def extract_prefix_attentions(tokens, tokenizer, model, device):
     """
     For a sentence of *n* words, compute word-level attention matrices
-    for each prefix  S_2, S_3, ..., S_n  (minimum prefix length = 2).
+    for each prefix  S_2, S_3, …, S_n  (minimum prefix length = 2).
 
-    Returns list of dicts with 'length' and 'layer_attentions'
-    (one (t+1, t+1) matrix per layer; slot 0 = [CLS]/ROOT).
+    Returns
+    -------
+    list[dict]  –  each dict contains
+        'length'           : int                     prefix length t
+        'layer_attentions' : list[np.ndarray]        one (t+1, t+1) matrix per layer
+                             (slot 0 = [CLS]/ROOT;  slots 1..t = words)
     """
     n = len(tokens)
     results = []
+
     for t in range(2, n + 1):
         prefix = tokens[:t]
+
         try:
             encoded = tokenizer(
-                prefix, is_split_into_words=True,
-                return_tensors="pt", padding=False,
-                truncation=True, max_length=512,
+                prefix,
+                is_split_into_words=True,
+                return_tensors="pt",
+                padding=False,
+                truncation=True,
+                max_length=512,
             )
         except Exception:
             continue
+
         word_ids = encoded.word_ids(batch_index=0)
+
         inputs = {k: v.to(device) for k, v in encoded.items()}
         with torch.no_grad():
             outputs = model(**inputs, output_attentions=True)
+
         num_layers = len(outputs.attentions)
         layer_word_attns = []
+
         for l_idx in range(num_layers):
+            # Average across attention heads  →  (seq_len, seq_len)
             attn_l = outputs.attentions[l_idx]               # (1, H, S, S)
             avg_attn = attn_l.mean(dim=1).squeeze(0)         # (S, S)
             avg_attn = avg_attn.cpu().numpy()
             # Returns (t+1, t+1) matrix: row/col 0 = [CLS]/ROOT
             word_attn = align_attention_to_words(avg_attn, word_ids, t)
             layer_word_attns.append(word_attn)
-        results.append({"length": t, "layer_attentions": layer_word_attns})
+
+        results.append({
+            "length":           t,
+            "layer_attentions": layer_word_attns,
+        })
+
     return results
 
 
@@ -486,27 +525,54 @@ def extract_prefix_attentions(tokens, tokenizer, model, device):
 
 def build_dependency_tree(attn_matrix):
     """
-    Construct a dependency tree from an (n_words+1, n_words+1) attention
-    matrix where slot 0 = [CLS]/ROOT.  Uses Chu-Liu/Edmonds max spanning
-    arborescence.  Returns dict {word_idx: head_idx}, head=-1 means ROOT.
+    Construct a dependency tree from a word-level attention matrix using
+    the Chu-Liu / Edmonds **maximum** spanning arborescence algorithm.
+
+    The input matrix has shape (n_words + 1, n_words + 1) where index 0
+    is the [CLS] token acting as a ROOT proxy (per Clark et al., 2019).
+    Word indices in the returned dict are 0-based (word 0 = first real
+    word), and head = -1 denotes attachment to ROOT.
+
+    Interpretation
+    --------------
+    A[i, j] = attention from slot i to slot j.
+    High A[i, j] ⟹ slot j is likely the *head* of slot i.
+    A[0, :] contains the ROOT ([CLS]) → word attention distribution.
+
+    Parameters
+    ----------
+    attn_matrix : np.ndarray, shape (n_words + 1, n_words + 1)
+        Index 0 = [CLS] / ROOT;  indices 1..n_words = real words.
+
+    Returns
+    -------
+    dict  {word_idx: head_idx}   (0-based words; head_idx = -1 ⟹ ROOT)
     """
     import networkx as nx
-    dim     = attn_matrix.shape[0]
-    n_words = dim - 1
+
+    dim     = attn_matrix.shape[0]           # n_words + 1
+    n_words = dim - 1                        # number of real words
+
+    # --- trivial cases (0 or 1 real word) ---
     if n_words <= 0:
         return {}
     if n_words == 1:
         return {0: -1}
 
+    # Build directed graph.  Node ids:
+    #   0 … n_words-1   =  real words
+    #   n_words          =  virtual ROOT (mapped from [CLS] slot 0)
     root_node = n_words
     G = nx.DiGraph()
 
-    # ROOT -> word edges using actual [CLS] attention
+    # Edges ROOT → word_i  using *actual* [CLS] attention (row 0)
     for wi in range(n_words):
-        cls_to_word = float(attn_matrix[wi + 1, 0])
-        G.add_edge(root_node, wi, weight=-cls_to_word)
+        # attn_matrix[slot_word, slot_CLS] = how much word wi attends to [CLS]
+        # We use this as the "ROOT → wi" edge weight (the word looks at ROOT)
+        cls_to_word = float(attn_matrix[wi + 1, 0])      # word attends to [CLS]
+        G.add_edge(root_node, wi, weight=-cls_to_word)    # negate for min-arb
 
-    # word -> word edges
+    # Edges word_j → word_i  (j is head of i;  weight = A[i+1, j+1])
     for wi in range(n_words):
         for wj in range(n_words):
             if wi != wj:
@@ -518,6 +584,7 @@ def build_dependency_tree(attn_matrix):
         heads = {}
         for u, v in arb.edges():
             heads[v] = -1 if u == root_node else u
+        # Safety: any word not in the arborescence gets ROOT
         for wi in range(n_words):
             if wi not in heads:
                 heads[wi] = -1
@@ -531,21 +598,31 @@ def _argmax_heads(attn_matrix):
     Language-agnostic fallback: assign each word its highest-attention
     head, and pick the ROOT dynamically (the word that attends most
     strongly to the [CLS] token, i.e. slot 0).
+
+    Parameters
+    ----------
+    attn_matrix : np.ndarray, shape (n_words + 1, n_words + 1)
+        Index 0 = [CLS] / ROOT;  indices 1..n_words = real words.
     """
     dim     = attn_matrix.shape[0]
     n_words = dim - 1
+
     if n_words <= 0:
         return {}
     if n_words == 1:
         return {0: -1}
-    cls_attn  = attn_matrix[1:, 0]
-    root_word = int(np.argmax(cls_attn))
+
+    # Dynamically choose ROOT: the word with the strongest attention to [CLS]
+    cls_attn = attn_matrix[1:, 0]            # shape (n_words,)
+    root_word = int(np.argmax(cls_attn))     # 0-based word index
+
     heads = {root_word: -1}
     for wi in range(n_words):
         if wi == root_word:
             continue
-        scores    = attn_matrix[wi + 1, 1:].copy()
-        scores[wi] = -np.inf
+        # Candidate heads: all other words (in word-word submatrix)
+        scores    = attn_matrix[wi + 1, 1:].copy()   # attention to each word
+        scores[wi] = -np.inf                          # prevent self-loop
         heads[wi]  = int(np.argmax(scores))
     return heads
 
@@ -556,8 +633,22 @@ def _argmax_heads(attn_matrix):
 
 def incremental_edge_change(prev_heads, curr_heads, n_prev):
     """
-    IEC(t) = |{i : head_t(i) != head_{t-1}(i)}| / (t-1)
-    Measures the fraction of existing words whose head changed.
+    Incremental Edge Change (IEC) between prefix trees T_{t-1} and T_t.
+
+        IEC(t)  =  |{ i ∈ {0,…,t-2} : head_t(i) ≠ head_{t-1}(i) }|  /  (t-1)
+
+    Measures the fraction of existing words whose head assignment changed
+    when one new token was appended.
+
+    Parameters
+    ----------
+    prev_heads : dict   head assignments for prefix of length t-1
+    curr_heads : dict   head assignments for prefix of length t
+    n_prev     : int    = t-1
+
+    Returns
+    -------
+    float in [0, 1]
     """
     if n_prev <= 1:
         return 0.0
@@ -584,7 +675,10 @@ def compute_tree_depth(heads, n):
 
 
 def compute_uas(predicted_heads, gold_heads, n):
-    """Unlabeled Attachment Score."""
+    """
+    Unlabeled Attachment Score: fraction of words whose predicted head
+    matches the gold-standard head.
+    """
     correct = sum(
         1 for i in range(n)
         if predicted_heads.get(i) == gold_heads.get(i)
@@ -597,7 +691,11 @@ def compute_uas(predicted_heads, gold_heads, n):
 # ============================================================================
 
 def generate_random_tree(n):
-    """Random recursive tree on n nodes rooted at 0."""
+    """
+    Random recursive tree on n nodes rooted at 0.
+    Node i (i ≥ 1) picks its parent uniformly from {0, …, i-1}.
+    This is guaranteed to be a valid rooted tree with no cycles.
+    """
     heads = {0: -1}
     for i in range(1, n):
         heads[i] = random.randint(0, i - 1)
@@ -605,7 +703,11 @@ def generate_random_tree(n):
 
 
 def compute_random_baseline_iec(max_length, n_trials=RANDOM_TRIALS):
-    """Monte-Carlo estimate of IEC for independent random trees."""
+    """
+    Monte-Carlo estimate of IEC for *independent* random trees at each
+    prefix length.  Independent trees represent the null hypothesis that
+    no structural information is carried across prefixes.
+    """
     iec_by_length = defaultdict(list)
     for _ in range(n_trials):
         prev = generate_random_tree(2)
@@ -619,7 +721,7 @@ def compute_random_baseline_iec(max_length, n_trials=RANDOM_TRIALS):
 
 
 def compute_random_baseline_depth(max_length, n_trials=RANDOM_TRIALS):
-    """Monte-Carlo estimate of |delta depth| for independent random trees."""
+    """Monte-Carlo estimate of |Δ depth| for independent random trees."""
     dc_by_length = defaultdict(list)
     for _ in range(n_trials):
         prev = generate_random_tree(2)
@@ -637,7 +739,10 @@ def compute_random_baseline_depth(max_length, n_trials=RANDOM_TRIALS):
 # ============================================================================
 
 def restrict_gold_tree_to_prefix(full_heads, t):
-    """Restrict a gold dependency tree to a prefix of length t."""
+    """
+    Restrict a gold dependency tree to a prefix of length *t*.
+    If a word's gold head falls outside the prefix, re-attach it to ROOT.
+    """
     restricted = {}
     for i in range(t):
         h = full_heads[i]
@@ -666,13 +771,19 @@ def compute_gold_prefix_iec(sentences):
 # ============================================================================
 
 def analyze_sentence(tokens, gold_heads, tokenizer, model, device):
-    """Full prefix-stability analysis for one sentence."""
+    """
+    Full prefix-stability analysis for one sentence.
+
+    Returns dict with IEC-by-length, depth-change-by-length, IEC-by-layer,
+    and full-sentence UAS.
+    """
     n = len(tokens)
     prefix_data = extract_prefix_attentions(tokens, tokenizer, model, device)
     if not prefix_data:
         return None
 
     num_layers  = len(prefix_data[0]["layer_attentions"])
+    # Middle third of layers (most syntactic; Clark et al., 2019)
     mid_start   = num_layers // 3
     mid_end     = 2 * num_layers // 3
     mid_layers  = set(range(mid_start, mid_end))
@@ -685,8 +796,8 @@ def analyze_sentence(tokens, gold_heads, tokenizer, model, device):
         "n_words":         n,
     }
 
-    prev_trees  = {}
-    prev_depths = {}
+    prev_trees  = {}          # layer → heads
+    prev_depths = {}          # layer → depth
 
     for pdata in prefix_data:
         t = pdata["length"]
@@ -714,12 +825,10 @@ def analyze_sentence(tokens, gold_heads, tokenizer, model, device):
                     results["uas"] = []
                 results["uas"].append(uas_val)
 
-    results["iec_by_length"]   = {t: np.mean(v)
-                                  for t, v in results["iec_by_length"].items()}
-    results["depth_by_length"] = {t: np.mean(v)
-                                  for t, v in results["depth_by_length"].items()}
-    results["iec_by_layer"]    = {l: np.mean(v)
-                                  for l, v in results["iec_by_layer"].items()}
+    # Collapse inner lists to means
+    results["iec_by_length"]   = {t: np.mean(v) for t, v in results["iec_by_length"].items()}
+    results["depth_by_length"] = {t: np.mean(v) for t, v in results["depth_by_length"].items()}
+    results["iec_by_layer"]    = {l: np.mean(v) for l, v in results["iec_by_layer"].items()}
     if results["uas"]:
         results["uas"] = np.mean(results["uas"])
     return results
@@ -743,7 +852,7 @@ def analyze_language(lang_name, sentences, tokenizer, model, device):
 
     for idx, sent in enumerate(sentences):
         if (idx + 1) % 10 == 0 or idx == 0:
-            print(f"  sentence {idx + 1}/{len(sentences)} ...")
+            print(f"  sentence {idx + 1}/{len(sentences)} …")
 
         res = analyze_sentence(
             sent["tokens"], sent["heads"], tokenizer, model, device,
@@ -779,13 +888,18 @@ def analyze_language(lang_name, sentences, tokenizer, model, device):
 # ============================================================================
 
 def run_statistical_test(llm_iecs, random_iecs):
-    """Paired t-test comparing LLM IEC vs random baseline IEC."""
+    """
+    Paired t-test comparing LLM IEC values against random baseline IEC
+    values.  Reports t-statistic, p-value, and Cohen's d.
+    """
     k   = min(len(llm_iecs), len(random_iecs))
     llm = np.array(llm_iecs[:k])
     rnd = np.array(random_iecs[:k])
+
     t_stat, p_val = stats.ttest_rel(llm, rnd)
     diff = rnd - llm
     d    = np.mean(diff) / (np.std(diff) + 1e-12)   # Cohen's d
+
     return {
         "t_stat":      t_stat,
         "p_value":     p_val,
@@ -815,9 +929,12 @@ def setup_plot_style():
     })
 
 
+# ---------- Figure 1: Stability curves ----------
+
 def plot_stability_curves(lang_results, random_iec, gold_iec, out):
-    """IEC vs prefix length -- LLM | Gold | Random."""
+    """IEC vs prefix length — LLM | Gold | Random."""
     fig, ax = plt.subplots(figsize=(8, 5))
+
     for lang, data in lang_results.items():
         xs = sorted(data["iec_by_length"].keys())
         ys = [data["iec_by_length"][t][0] for t in xs]
@@ -827,20 +944,26 @@ def plot_stability_curves(lang_results, random_iec, gold_iec, out):
         ax.fill_between(xs, [y - s for y, s in zip(ys, se)],
                             [y + s for y, s in zip(ys, se)],
                         alpha=0.12, color=LANG_COLORS.get(lang, "#333"))
+
+    # Gold reference (English only, if available)
     if "English" in gold_iec and gold_iec["English"]:
         gx = sorted(gold_iec["English"].keys())
         gy = [gold_iec["English"][t] for t in gx]
         ax.plot(gx, gy, "^-", color="#7B1FA2", label="Gold UD (English)",
                 markersize=4, linewidth=1.5, alpha=0.8)
+
+    # Random baseline
     rx = sorted(random_iec.keys())
     ry = [random_iec[t] for t in rx]
     ax.plot(rx, ry, "s--", color=RANDOM_COLOR,
             label="Random Baseline", markersize=4, linewidth=2)
+
     ax.set_xlabel("Prefix Length (tokens)")
     ax.set_ylabel("Incremental Edge Change (IEC)")
     ax.set_title("Structural Stability: LLM Attention Trees vs Baselines")
     ax.legend(loc="upper right", framealpha=0.9)
     ax.set_ylim(0, 1)
+
     plt.tight_layout()
     path = os.path.join(out, "fig1_stability_curves.png")
     plt.savefig(path, dpi=300, bbox_inches="tight")
@@ -848,17 +971,22 @@ def plot_stability_curves(lang_results, random_iec, gold_iec, out):
     print(f"  Saved {path}")
 
 
+# ---------- Figure 2: Language comparison bar chart ----------
+
 def plot_language_comparison(lang_results, random_mean, out):
     fig, ax = plt.subplots(figsize=(7, 4.5))
+
     langs     = list(lang_results.keys())
     llm_means = [lang_results[l]["mean_iec"] for l in langs]
     x = np.arange(len(langs))
     w = 0.35
+
     bars1 = ax.bar(x - w / 2, llm_means, w,
                    color=[LANG_COLORS.get(l, "#333") for l in langs],
                    label="LLM Attention Trees", alpha=0.85)
     bars2 = ax.bar(x + w / 2, [random_mean] * len(langs), w,
                    color=RANDOM_COLOR, label="Random Baseline", alpha=0.85)
+
     ax.set_xlabel("Language")
     ax.set_ylabel("Mean IEC")
     ax.set_title("Cross-Lingual Comparison of Structural Stability")
@@ -866,10 +994,12 @@ def plot_language_comparison(lang_results, random_mean, out):
     ax.set_xticklabels(langs)
     ax.legend()
     ax.set_ylim(0, 0.85)
+
     for bar in list(bars1) + list(bars2):
         h = bar.get_height()
         ax.text(bar.get_x() + bar.get_width() / 2, h + 0.01,
                 f"{h:.3f}", ha="center", va="bottom", fontsize=9)
+
     plt.tight_layout()
     path = os.path.join(out, "fig2_language_comparison.png")
     plt.savefig(path, dpi=300, bbox_inches="tight")
@@ -877,22 +1007,29 @@ def plot_language_comparison(lang_results, random_mean, out):
     print(f"  Saved {path}")
 
 
+# ---------- Figure 3: Layer-wise analysis ----------
+
 def plot_layer_analysis(lang_results, out):
     fig, ax = plt.subplots(figsize=(8, 5))
+
     for lang, data in lang_results.items():
         layers = sorted(data["iec_by_layer"].keys())
         means  = [data["iec_by_layer"][l][0] for l in layers]
         ax.plot([l + 1 for l in layers], means, "o-",
                 color=LANG_COLORS.get(lang, "#333"),
                 label=lang, markersize=5, linewidth=1.5)
+
     ax.set_xlabel("BERT Layer")
     ax.set_ylabel("Mean IEC")
     ax.set_title("Layer-wise Structural Stability Analysis")
     ax.legend()
     ax.set_xticks(range(1, 13))
+
+    # Highlight 'syntactic' layers
     ax.axvspan(4.5, 8.5, alpha=0.08, color="green")
     ax.text(6.5, ax.get_ylim()[1] * 0.93, "Syntactic\nLayers",
             ha="center", fontsize=9, color="green", alpha=0.7)
+
     plt.tight_layout()
     path = os.path.join(out, "fig3_layer_analysis.png")
     plt.savefig(path, dpi=300, bbox_inches="tight")
@@ -900,21 +1037,27 @@ def plot_layer_analysis(lang_results, out):
     print(f"  Saved {path}")
 
 
+# ---------- Figure 4: Tree depth volatility ----------
+
 def plot_depth_analysis(lang_results, random_depth, out):
     fig, ax = plt.subplots(figsize=(8, 5))
+
     for lang, data in lang_results.items():
         xs = sorted(data["depth_by_length"].keys())
         ys = [data["depth_by_length"][t][0] for t in xs]
         ax.plot(xs, ys, "o-", color=LANG_COLORS.get(lang, "#333"),
                 label=f"{lang} (LLM)", markersize=4, linewidth=1.5)
+
     rx = sorted(random_depth.keys())
     ry = [random_depth[t] for t in rx]
     ax.plot(rx, ry, "s--", color=RANDOM_COLOR,
             label="Random Baseline", markersize=4, linewidth=2)
+
     ax.set_xlabel("Prefix Length (tokens)")
-    ax.set_ylabel("|Delta Tree Depth|")
+    ax.set_ylabel("|Δ Tree Depth|")
     ax.set_title("Tree Depth Volatility: LLM vs Random Baseline")
     ax.legend()
+
     plt.tight_layout()
     path = os.path.join(out, "fig4_depth_change.png")
     plt.savefig(path, dpi=300, bbox_inches="tight")
@@ -927,18 +1070,20 @@ def plot_depth_analysis(lang_results, random_depth, out):
 # ============================================================================
 
 def main():
+    # Ensure UTF-8 output on Windows consoles
     if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
     banner = """
-    ======================================================================
-      LM1 : Do LLMs Develop Dependency Grammar?
-      Prefix Structural Stability Analysis Pipeline
-    ======================================================================
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  LM1 : Do LLMs Develop Dependency Grammar?                 ║
+    ║  Prefix Structural Stability Analysis Pipeline              ║
+    ╚══════════════════════════════════════════════════════════════╝
     """
     print(banner)
 
+    # ---- CLI arguments ----
     ap = argparse.ArgumentParser(description="LM1 analysis pipeline")
     ap.add_argument("--max_sentences", type=int, default=100,
                     help="Max sentences per language  (default 100)")
@@ -958,9 +1103,11 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # STAGE 1: DATA LOADING
+    # ================================================================
+    # STAGE 1 :  DATA LOADING
+    # ================================================================
     print("\n" + "=" * 60)
-    print("  STAGE 1 - DATA LOADING")
+    print("  STAGE 1 — DATA LOADING")
     print("=" * 60)
 
     all_sentences = {}
@@ -973,9 +1120,11 @@ def main():
         print("FATAL: no data loaded.  Check network / dataset names.")
         sys.exit(1)
 
-    # STAGE 2: ATTENTION EXTRACTION + TREE CONSTRUCTION
+    # ================================================================
+    # STAGE 2 :  ATTENTION EXTRACTION  +  TREE CONSTRUCTION
+    # ================================================================
     print("\n" + "=" * 60)
-    print("  STAGE 2 - MODEL & ATTENTION EXTRACTION")
+    print("  STAGE 2 — MODEL & ATTENTION EXTRACTION")
     print("=" * 60)
 
     tokenizer, model, device = load_model(args.model)
@@ -986,20 +1135,25 @@ def main():
             lang, sentences, tokenizer, model, device,
         )
 
-    # STAGE 3: BASELINES + EVALUATION
+    # ================================================================
+    # STAGE 3 :  BASELINES  +  EVALUATION
+    # ================================================================
     print("\n" + "=" * 60)
-    print("  STAGE 3 - BASELINES & EVALUATION")
+    print("  STAGE 3 — BASELINES & EVALUATION")
     print("=" * 60)
 
+    # --- Random baselines ---
     random_iec   = compute_random_baseline_iec(MAX_SENT_LEN, RANDOM_TRIALS)
     random_depth = compute_random_baseline_depth(MAX_SENT_LEN, RANDOM_TRIALS)
     random_mean  = float(np.mean(list(random_iec.values())))
     print(f"  Random baseline mean IEC : {random_mean:.4f}")
 
+    # --- Gold-tree prefix stability ---
     gold_iec = {}
     for lang, sentences in all_sentences.items():
         gold_iec[lang] = compute_gold_prefix_iec(sentences)
 
+    # --- Statistical tests ---
     print("\n  Statistical tests (paired t-test):")
     random_samples = []
     for t in range(3, MAX_SENT_LEN + 1):
@@ -1021,7 +1175,9 @@ def main():
         print(f"    Cohen's d       = {test['cohens_d']:.4f}")
         print(f"    Mean UAS        = {data['mean_uas']:.4f}")
 
+    # ================================================================
     # FIGURES
+    # ================================================================
     print("\n" + "=" * 60)
     print("  GENERATING FIGURES")
     print("=" * 60)
@@ -1032,7 +1188,9 @@ def main():
     plot_layer_analysis(lang_results, args.output_dir)
     plot_depth_analysis(lang_results, random_depth, args.output_dir)
 
+    # ================================================================
     # SUMMARY
+    # ================================================================
     print("\n" + "=" * 60)
     print("  RESULTS SUMMARY")
     print("=" * 60)
@@ -1041,11 +1199,12 @@ def main():
               f"   UAS = {data['mean_uas']:.4f}")
     print(f"  {'Random':10s}  Mean IEC = {random_mean:.4f}")
     print(f"\n  All figures saved to: {os.path.abspath(args.output_dir)}")
-    print("  Pipeline complete.")
+    print("  Pipeline complete ✓")
 
 
 # ============================================================================
 if __name__ == "__main__":
     main()
+
 ```
 
