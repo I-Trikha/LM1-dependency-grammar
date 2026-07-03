@@ -4,13 +4,6 @@
 
 > Final Project — Computational Linguistics (CSG), April 2026
 
-## Authors
-
-- Jani Ravi Kailash (240486)
-- Aditya Panwar (240063)
-- Birkurwar Hitesh (240277)
-- Ishan Trikha (240471)
-- Sandeep Kumar Gupta (240928)
 
 ## Overview
 
